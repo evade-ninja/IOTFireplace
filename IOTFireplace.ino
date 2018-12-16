@@ -1,3 +1,7 @@
+extern "C" { //used to allow setting hostname
+#include "user_interface.h"
+}
+
 #include <ESP8266WiFi.h>
 #include <MQTT.h>
 
@@ -11,6 +15,8 @@
 #define RELAY_PIN D1
 #define SWITCH_PIN D3
 
+#define SERIAL_DEBUG
+
 unsigned long lastUpdateTime = 0;
 unsigned long pushAmt = 0;
 unsigned long blockedTime = 0;
@@ -22,19 +28,40 @@ boolean fireplaceStatus = false; // false = off, true = on
 
 
 void setup(){
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, pass);
+
+    #ifdef SERIAL_DEBUG
+    Serial.begin(112500);
+    #endif
 
     pinMode(RELAY_PIN, OUTPUT);
     pinMode(SWITCH_PIN, INPUT_PULLUP);
+
+    wifi_station_set_hostname("fireplace");
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, pass);
+
+   #ifdef SERIAL_DEBUG
+    Serial.println("WiFi Started");
+    #endif
 
     while(WiFi.status() != WL_CONNECTED){
         delay(500);
     }
 
+    #ifdef SERIAL_DEBUG
+    Serial.println("WiFi Connected");
+    #endif
+
     client.begin(MQTT_SERVER, net);
+    client.onMessage(messageReceived);
+
     delay(500);
     connect();
+
+    #ifdef SERIAL_DEBUG
+    Serial.println("MQTT Connected");
+    #endif
+
     sendStatus();
 }
 
@@ -42,11 +69,24 @@ void connect(){
     if(WiFi.status() != WL_CONNECTED){
         delay(1000);
     }
-    client.connect(MQTT_HOSTNAME);
+
+    while(!client.connect(MQTT_HOSTNAME)){
+        #ifdef SERIAL_DEBUG
+        Serial.print(".");
+        #endif
+        delay(1000);
+    }
     client.subscribe(TOPIC_CMD);
 }
 
 void messageReceived(String &topic, String &payload){
+    #ifdef SERIAL_DEBUG
+    Serial.print("MQTT Topic: ");
+    Serial.println(topic);
+    Serial.print("MQTT Payload: ");
+    Serial.println(payload);
+    #endif
+
     if(topic == TOPIC_CMD && payload == "ON"){
         fireplaceOn();
     }
@@ -59,19 +99,25 @@ void messageReceived(String &topic, String &payload){
 }
 
 void fireplaceOn(){
+    #ifdef SERIAL_DEBUG
+    Serial.println("Fireplace turned on.");
+    #endif
     fireplaceStatus = true;
     digitalWrite(RELAY_PIN, HIGH);
     client.publish(TOPIC_STATUS, "ON");
 }
 
 void fireplaceOff(){
+    #ifdef SERIAL_DEBUG
+    Serial.println("Fireplace turned off");
+    #endif
     fireplaceStatus = false;
     digitalWrite(RELAY_PIN, LOW);
     client.publish(TOPIC_STATUS, "OFF");
 }
 
 void loop(){
-
+    client.loop();
     if(lastUpdateTime + INTERVAL < millis()){
         if(!client.connected()){
             connect();
@@ -100,6 +146,10 @@ void loop(){
 
 void sendStatus(){
     if(WiFi.status() == WL_CONNECTED){
+        #ifdef SERIAL_DEBUG
+        Serial.println("Publishing status");
+        #endif
+
         String s = "";
 
         if(fireplaceStatus){
